@@ -1,9 +1,6 @@
-use std::{
-    fs,
-    process::{exit, ExitCode, ExitStatus},
-};
+use std::{fs, time::Duration};
 
-use log::{error, warn};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 
 const SETTINGS_FILE_PATH: &str = "./settings.yaml";
@@ -11,7 +8,8 @@ const SETTINGS_FILE_PATH: &str = "./settings.yaml";
 #[derive(Deserialize, Serialize)]
 struct Configuration {
     port_name: String,
-    baud_rate: i32,
+    baud_rate: u32,
+    connect_timeout_ms: u64,
 }
 
 impl Default for Configuration {
@@ -20,6 +18,7 @@ impl Default for Configuration {
         Self {
             port_name: "/dev/ttyUSB0".to_owned(),
             baud_rate: 115_200,
+            connect_timeout_ms: 20_000,
         }
     }
 }
@@ -50,5 +49,40 @@ fn main() {
 }
 
 fn run(configuration: &Configuration) {
-    todo!("application logic goes here")
+    info!(
+        "Attemping to open serialport \"{}\" with a baud rate of {}",
+        configuration.port_name, configuration.baud_rate
+    );
+
+    match serialport::new(configuration.port_name.to_owned(), configuration.baud_rate)
+        .timeout(Duration::from_millis(configuration.connect_timeout_ms))
+        .open()
+    {
+        Ok(mut port) => listen(&mut port),
+        Err(e) => {
+            error!("Unable to open serial port: {}", e);
+
+            if let Ok(ports) = serialport::available_ports() {
+                info!(
+                    "Available serial ports:\n{}",
+                    ports
+                        .iter()
+                        .map(|p| format!("\t\t  \"{}\"", p.port_name))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+            }
+        }
+    }
+}
+
+fn listen(port: &mut Box<dyn serialport::SerialPort>) {
+    let mut buffer: Vec<u8> = vec![0; 2048];
+
+    loop {
+        match port.read(buffer.as_mut_slice()) {
+            Ok(t) => info!("{}", String::from_utf8_lossy(&buffer[..t])),
+            Err(e) => error!("Failed to read: {}", e)
+        }
+    }
 }
