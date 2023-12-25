@@ -1,6 +1,7 @@
 use std::{fs, time::Duration};
 
 use log::{error, info, warn};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 const SETTINGS_FILE_PATH: &str = "./settings.yaml";
@@ -77,12 +78,30 @@ fn run(configuration: &Configuration) {
 }
 
 fn listen(port: &mut Box<dyn serialport::SerialPort>) {
+    let transmission_end_pattern =
+        Regex::new(r"!\w{4}\r\n").expect("Failed to compile transmission start regex");
+
+    // A transmission consists out of a data payload with a maximum of 1024 characters
+    // Since there are only a handful of extra characters needed to make up a message, a buffer of 2048 bytes suffices
     let mut buffer: Vec<u8> = vec![0; 2048];
+    let mut transmission = String::new();
 
     loop {
         match port.read(buffer.as_mut_slice()) {
-            Ok(t) => info!("{}", String::from_utf8_lossy(&buffer[..t])),
-            Err(e) => error!("Failed to read: {}", e)
+            Ok(size) => {
+                transmission.push_str(&String::from_utf8_lossy(&buffer[..size]));
+
+                // End of the transmission
+                if transmission_end_pattern.is_match(&transmission) {
+                    process(&transmission);
+                    transmission.clear();
+                }
+            }
+            Err(e) => error!("Failed to read serial port data: {}", e),
         }
     }
+}
+
+fn process(transmission: &str) {
+    println!("{}", transmission);
 }
