@@ -1,3 +1,5 @@
+mod obis;
+
 use std::{fs, time::Duration};
 
 use log::{error, info, warn};
@@ -6,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 const SETTINGS_FILE_PATH: &str = "./settings.yaml";
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Configuration {
     port_name: String,
     baud_rate: u32,
@@ -23,6 +25,13 @@ impl Default for Configuration {
         }
     }
 }
+
+struct Transmission {
+    identifier: String,
+    messages: Vec<TransmissionMessage>,
+}
+
+struct TransmissionMessage {}
 
 fn main() {
     pretty_env_logger::formatted_builder()
@@ -102,6 +111,29 @@ fn listen(port: &mut Box<dyn serialport::SerialPort>) {
     }
 }
 
-fn process(transmission: &str) {
-    println!("{}", transmission);
+fn process(transmission: &str) -> Option<Transmission> {
+    // Header and data is split by a double newline
+    let header_and_remainder = transmission.split("\r\n\r\n").collect::<Vec<_>>();
+    let identifier = &header_and_remainder[0][5..];
+
+    // Each message is separated by a carriage return and a line feed
+    let mut messages = header_and_remainder[1].split("\r\n").collect::<Vec<_>>();
+
+    // The last two entries will always be the end of message indicator and a carriage return with newline, which can safely be ignored
+    messages.truncate(messages.len() - 2);
+
+    for message in &messages {
+        let obis_reference = obis::ObisReference::from_message(&message);
+
+        if obis_reference.is_some() {
+            let value = obis::ObisReference::get_value(&message);
+            let ref_name = obis_reference.unwrap().to_string();
+
+            if !value.trim().is_empty() {
+                println!("{: <48}\t{}", ref_name, value);
+            }
+        }
+    }
+
+    None
 }
